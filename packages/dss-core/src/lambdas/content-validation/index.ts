@@ -44,6 +44,8 @@ function approxEqual(a: number, b: number, tolerancePct: number): boolean {
 
 function validateSSN(ssn: string | undefined): ValidationSignal | null {
   if (!ssn) return null;
+  if (/^[Xx]{3}-[Xx]{2}-\d{4}$/.test(ssn.trim()))
+    return { check: 'ssn_format', passed: true, severity: 'low', detail: 'SSN properly masked' };
   const cleaned = ssn.replace(/[^0-9]/g, '');
   if (cleaned.length !== 9)
     return { check: 'ssn_format', passed: false, severity: 'high', detail: `SSN not 9 digits: ${ssn}` };
@@ -125,7 +127,7 @@ function validatePaystub(fields: PaystubFields): ValidationSignal[] {
   }
 
   // Employer name
-  const employer = (fields.employer_name || '').trim().toLowerCase();
+  const employer = (fields.employer_name || (fields as any).employerName || (fields as any).company || (fields as any).employersName || '').trim().toLowerCase();
   const generic = ['company','employer','test','acme','sample','n/a','na','none','abc','xyz'];
   if (!employer) signals.push({ check: 'employer_name', passed: false, severity: 'high', detail: 'Employer name empty' });
   else if (generic.includes(employer)) signals.push({ check: 'employer_name', passed: false, severity: 'medium', detail: `Generic employer: "${fields.employer_name}"` });
@@ -189,10 +191,10 @@ export const handler = async (event: any): Promise<any> => {
   const documentId = event.documentId;
   const matterId = event.matterId;
   const documentType = (event.classificationResult?.documentType || 'unknown').toLowerCase();
-  const extractedFields = extractionResult.fields || extractionResult.data || {};
+  const extractedFields = extractionResult.extractedData || extractionResult.fields || extractionResult.data || {};
 
   const phase1Score = fraudResult.fraudResult?.score ?? fraudResult.score ?? 1.0;
-  const visualScore = fraudResult.fraudResult?.visualScore ?? fraudResult.visualScore ?? 1.0;
+  const visualScore = fraudResult.fraudResult?.visualScore ?? fraudResult.visualScore ?? 0;
 
   let signals: ValidationSignal[] = [];
   if (documentType.includes('paystub') || documentType.includes('pay_stub') || documentType.includes('pay stub'))
@@ -201,7 +203,8 @@ export const handler = async (event: any): Promise<any> => {
 
   const contentScore = computeContentScore(signals);
   const finalScore = (phase1Score * 0.3) + (contentScore * 0.5) + (visualScore * 0.2);
-  const flagged = finalScore < 0.7 || signals.some(s => !s.passed && s.severity === 'critical');
+  const hasCritical = signals.some(s => !s.passed && (s.severity === 'critical' || s.severity === 'high'));
+  const flagged = (finalScore > 0.6 && hasCritical) || signals.filter(s => !s.passed && s.severity === 'critical').length >= 2;
 
   const result: ContentValidationResult = { documentId, matterId, contentScore, phase1Score, visualScore, finalScore, flagged, signals, documentType };
 
