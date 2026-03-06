@@ -7,5 +7,6 @@
     "build": "tsc",
     "test": "jest",
     "lint": "eslint src/"
-  }
+  },
+  "dependencies": {}
 }
