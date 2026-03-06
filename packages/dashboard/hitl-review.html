@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IDP HITL Case Management</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;overflow:hidden;height:100vh}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:#0d1117}::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px}::-webkit-scrollbar-thumb:hover{background:#484f58}
+input,select,textarea,button{font-family:inherit}a{color:#58a6ff;text-decoration:none}
+
+.header{height:48px;background:#161b22;border-bottom:1px solid #21262d;display:flex;align-items:center;padding:0 16px;gap:16px;flex-shrink:0}
+.header h1{font-size:16px;color:#f0f6fc;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.header h1 span{font-size:20px}
+.header-nav{display:flex;gap:2px;margin-left:16px}
+.header-nav button{padding:6px 14px;background:none;border:none;color:#8b949e;cursor:pointer;font-size:13px;border-radius:6px;transition:all .15s}
+.header-nav button:hover{color:#c9d1d9;background:#21262d}
+.header-nav button.active{color:#f0f6fc;background:#30363d}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.reviewer-input{padding:4px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;width:140px}
+.reviewer-input:focus{border-color:#58a6ff;outline:none}
+.connection-dot{width:8px;height:8px;border-radius:50%;background:#3fb950}
+.connection-dot.offline{background:#f85149;animation:pulse 1.5s infinite}
+
+.stats-bar{height:40px;background:#161b22;border-bottom:1px solid #21262d;display:flex;align-items:center;padding:0 16px;gap:24px;flex-shrink:0}
+.stat{display:flex;align-items:center;gap:6px;font-size:12px;color:#8b949e}
+.stat-val{color:#f0f6fc;font-weight:600;font-size:13px}
+.stat-val.warn{color:#d29922}.stat-val.danger{color:#f85149}.stat-val.good{color:#3fb950}
+
+.main{height:calc(100vh - 88px);overflow:hidden;position:relative}
+.view{display:none;height:100%;overflow:auto}.view.active{display:flex;flex-direction:column}
+
+.filter-bar{padding:10px 16px;background:#0d1117;border-bottom:1px solid #21262d;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0}
+.filter-bar select,.filter-bar input{padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px}
+.filter-bar select:focus,.filter-bar input:focus{border-color:#58a6ff;outline:none}
+.filter-bar input[type=search]{width:200px}
+.filter-group{display:flex;gap:4px;align-items:center}
+.filter-group label{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px}
+
+table.queue-table{width:100%;border-collapse:collapse;font-size:13px}
+.queue-table th{position:sticky;top:0;background:#161b22;text-align:left;padding:8px 12px;color:#8b949e;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #30363d;white-space:nowrap}
+.queue-table td{padding:8px 12px;border-bottom:1px solid #161b22;white-space:nowrap}
+.queue-table tr:hover{background:#161b22}
+.queue-table tr.sla-ok td:first-child{border-left:3px solid #3fb950}
+.queue-table tr.sla-warning td:first-child{border-left:3px solid #d29922}
+.queue-table tr.sla-danger td:first-child{border-left:3px solid #f85149}
+.queue-table tr.sla-breached td:first-child{border-left:3px solid #f85149}
+.queue-table tr.sla-breached{animation:pulse-row 2s infinite}
+
+.doc-id-cell{font-family:monospace;font-size:11px;color:#79c0ff}
+.conf-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.conf-high{color:#3fb950;background:#3fb95015}.conf-med{color:#d29922;background:#d2992215}.conf-low{color:#f85149;background:#f8514915}
+.queue-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase}
+.queue-hitl{color:#a371f7;background:#a371f715}.queue-fraud{color:#f85149;background:#f8514915}
+.status-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase}
+.status-pending{color:#d29922;background:#d2992215}.status-in_review{color:#58a6ff;background:#58a6ff15}.status-escalated{color:#a371f7;background:#a371f715}
+.sla-green{color:#3fb950}.sla-yellow{color:#d29922}.sla-red{color:#f85149}.sla-breached-text{color:#f85149;animation:pulse 1.5s infinite}
+
+.btn{padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s}
+.btn:hover{filter:brightness(1.2)}
+.btn-claim{background:#238636;color:#fff}.btn-claim:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-approve{background:#238636;color:#fff}.btn-reject{background:#da3633;color:#fff}.btn-escalate{background:#9e6a03;color:#fff}
+.btn-release{background:#30363d;color:#c9d1d9}.btn-primary{background:#1f6feb;color:#fff}
+.btn-ghost{background:none;color:#8b949e;border:1px solid #30363d}.btn-ghost:hover{color:#c9d1d9;border-color:#484f58}
+
+.queue-table-wrap{flex:1;overflow:auto}
+.pagination{padding:8px 16px;border-top:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#8b949e;flex-shrink:0}
+
+.review-header{height:44px;background:#161b22;border-bottom:1px solid #21262d;display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0}
+.review-header .back-btn{background:none;border:none;color:#58a6ff;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px}
+.review-header .doc-title{font-size:14px;color:#f0f6fc;font-weight:600}
+.review-header .doc-meta-inline{font-size:12px;color:#8b949e}
+.review-header .sla-inline{margin-left:auto;font-family:monospace;font-size:13px;font-weight:600}
+.review-timer{font-size:12px;color:#8b949e;font-family:monospace}
+
+.review-split{display:flex;flex:1;overflow:hidden}
+.pdf-pane{width:50%;border-right:1px solid #21262d;display:flex;flex-direction:column;background:#000}
+.pdf-toolbar{height:36px;background:#161b22;border-bottom:1px solid #21262d;display:flex;align-items:center;padding:0 10px;gap:8px;flex-shrink:0}
+.pdf-toolbar button{background:none;border:1px solid #30363d;color:#c9d1d9;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px}
+.pdf-toolbar button:hover{background:#21262d}
+.pdf-toolbar span{font-size:12px;color:#8b949e}
+.pdf-toolbar input[type=number]{width:40px;padding:2px 4px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:12px;text-align:center}
+.pdf-container{flex:1;overflow:auto;display:flex;justify-content:center;padding:10px;background:#1a1a1a}
+.pdf-container canvas{max-width:100%;box-shadow:0 2px 12px rgba(0,0,0,.5)}
+
+.review-pane{width:50%;display:flex;flex-direction:column;overflow:hidden}
+.review-tabs{display:flex;border-bottom:1px solid #21262d;background:#161b22;flex-shrink:0}
+.review-tabs button{padding:8px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#8b949e;cursor:pointer;font-size:12px;transition:all .15s}
+.review-tabs button:hover{color:#c9d1d9}
+.review-tabs button.active{color:#f0f6fc;border-bottom-color:#58a6ff}
+.tab-content{flex:1;overflow-y:auto;padding:16px}
+.tab-panel{display:none}.tab-panel.active{display:block}
+
+.field-group{margin-bottom:16px}
+.field-group-title{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #21262d}
+.field-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;margin-bottom:2px;transition:background .15s}
+.field-row:hover{background:#161b22}
+.field-row.modified{background:#1f6feb15;border-left:3px solid #58a6ff}
+.field-row.low-confidence{background:#d2992210}
+.field-label{width:140px;font-size:12px;color:#8b949e;flex-shrink:0;display:flex;align-items:center;gap:4px}
+.field-original{font-size:11px;color:#484f58;font-family:monospace;width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field-input{flex:1;padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:12px;font-family:monospace}
+.field-input:focus{border-color:#58a6ff;outline:none}
+.field-input.modified{border-color:#58a6ff;background:#1f6feb10}
+.field-conf{width:36px;text-align:right;font-size:10px;font-weight:600;flex-shrink:0}
+.conf-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:2px}
+.conf-dot.high{background:#3fb950}.conf-dot.med{background:#d29922}.conf-dot.low{background:#f85149}
+
+.classification-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:12px}
+.classification-card h3{font-size:14px;color:#f0f6fc;margin-bottom:8px}
+.classification-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #21262d}
+.classification-row:last-child{border-bottom:none}
+
+.fraud-score-container{text-align:center;margin-bottom:20px}
+.fraud-score-label{font-size:24px;font-weight:700}
+.fraud-signal{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:8px}
+.fraud-signal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.fraud-signal-type{font-size:13px;font-weight:600;color:#f0f6fc}
+.fraud-signal-prob{font-size:12px;font-weight:600}
+.fraud-signal-desc{font-size:12px;color:#8b949e}
+.fraud-bar{height:4px;background:#21262d;border-radius:2px;margin-top:6px}
+.fraud-bar-fill{height:100%;border-radius:2px}
+
+.notes-input-row{display:flex;gap:8px;margin-bottom:12px}
+.notes-input-row textarea{flex:1;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;resize:vertical;min-height:60px}
+.notes-input-row textarea:focus{border-color:#58a6ff;outline:none}
+.note-item{padding:10px;background:#161b22;border:1px solid #21262d;border-radius:6px;margin-bottom:6px}
+.note-meta{font-size:11px;color:#8b949e;margin-bottom:4px}
+.note-text{font-size:13px;color:#c9d1d9}
+
+.action-bar{height:52px;background:#161b22;border-top:1px solid #21262d;display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0}
+.action-bar .spacer{flex:1}
+.action-bar .shortcuts-hint{font-size:10px;color:#484f58}
+
+.history-controls{padding:10px 16px;background:#0d1117;border-bottom:1px solid #21262d;display:flex;gap:8px;align-items:center;flex-shrink:0}
+.history-controls input{padding:6px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;width:250px}
+.history-controls input:focus{border-color:#58a6ff;outline:none}
+table.history-table{width:100%;border-collapse:collapse;font-size:13px}
+.history-table th{position:sticky;top:0;background:#161b22;text-align:left;padding:8px 12px;color:#8b949e;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #30363d}
+.history-table td{padding:8px 12px;border-bottom:1px solid #161b22}
+.history-table tr:hover{background:#161b22}
+.history-table tr.expandable{cursor:pointer}
+.diff-row{display:none;background:#0d1117}.diff-row.open{display:table-row}
+.diff-content{padding:12px;font-size:12px}
+.diff-item{display:flex;gap:12px;padding:4px 0;border-bottom:1px solid #161b22}
+.diff-field{color:#79c0ff;width:160px;font-family:monospace}
+.diff-old{color:#f85149;text-decoration:line-through}.diff-new{color:#3fb950}
+.action-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase}
+.action-approve{color:#3fb950;background:#3fb95015}.action-reject{color:#f85149;background:#f8514915}.action-escalate{color:#d29922;background:#d2992215}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;width:420px;max-width:90vw}
+.modal h2{font-size:16px;color:#f0f6fc;margin-bottom:16px}
+.modal label{display:block;font-size:12px;color:#8b949e;margin-bottom:4px}
+.modal select,.modal textarea,.modal input{width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;margin-bottom:12px}
+.modal select:focus,.modal textarea:focus,.modal input:focus{border-color:#58a6ff;outline:none}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+
+.toast-container{position:fixed;top:56px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:8px}
+.toast{padding:10px 16px;border-radius:8px;font-size:13px;animation:slideIn .3s ease;max-width:360px}
+.toast-success{background:#238636;color:#fff}.toast-error{background:#da3633;color:#fff}.toast-warn{background:#9e6a03;color:#fff}.toast-info{background:#1f6feb;color:#fff}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes pulse-row{0%,100%{background:transparent}50%{background:#f8514910}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slideIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>📋</span> IDP Case Management</h1>
+  <div class="header-nav">
+    <button class="active" data-view="queue">Queue</button>
+    <button data-view="history">History</button>
+  </div>
+  <div class="header-right">
+    <input class="reviewer-input" id="reviewerInput" placeholder="Your name..." />
+    <div class="connection-dot" id="connDot" title="Connected"></div>
+  </div>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat">Reviewed Today: <span class="stat-val" id="statReviewed">—</span></div>
+  <div class="stat">Avg Time: <span class="stat-val" id="statAvgTime">—</span></div>
+  <div class="stat">Queue Depth: <span class="stat-val" id="statDepth">—</span></div>
+  <div class="stat">HITL Pending: <span class="stat-val" id="statHitlPending">—</span></div>
+  <div class="stat">Fraud Pending: <span class="stat-val" id="statFraudPending">—</span></div>
+  <div class="stat">SLA Compliance: <span class="stat-val" id="statSla">—</span></div>
+  <div class="stat">Breaches: <span class="stat-val danger" id="statBreaches">—</span></div>
+</div>
+
+<div class="main">
+
+  <div class="view active" id="viewQueue">
+    <div class="filter-bar">
+      <div class="filter-group"><label>Queue</label>
+        <select id="filterQueue"><option value="all">All</option><option value="hitl">HITL</option><option value="fraud">Fraud</option></select>
+      </div>
+      <div class="filter-group"><label>Doc Type</label>
+        <select id="filterDocType"><option value="all">All Types</option><option value="paystub">Paystub</option><option value="w2">W-2</option><option value="bank_statement">Bank Statement</option><option value="tax_return">Tax Return</option><option value="1099">1099</option></select>
+      </div>
+      <div class="filter-group"><label>SLA</label>
+        <select id="filterSla"><option value="all">All</option><option value="ok">OK</option><option value="warning">Warning</option><option value="breached">Breached</option></select>
+      </div>
+      <div class="filter-group"><label>Status</label>
+        <select id="filterStatus"><option value="all">All</option><option value="pending">Pending</option><option value="in_review">In Review</option><option value="escalated">Escalated</option></select>
+      </div>
+      <input type="search" id="filterSearch" placeholder="Search document ID or borrower..." />
+      <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:#484f58" id="lastRefresh">—</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadQueue()">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="queue-table-wrap" id="queueTableWrap">
+      <table class="queue-table"><thead><tr>
+        <th>Document ID</th><th>Type</th><th>Borrower</th><th>Confidence</th><th>Queue</th><th>Status</th><th>Time in Queue</th><th>SLA</th><th>Assigned To</th><th>Action</th>
+      </tr></thead><tbody id="queueBody"></tbody></table>
+    </div>
+    <div class="pagination" id="queuePagination"></div>
+  </div>
+
+  <div class="view" id="viewReview">
+    <div class="review-header">
+      <button class="back-btn" onclick="navigateTo('queue')">← Queue</button>
+      <span class="doc-title" id="reviewDocTitle">—</span>
+      <span class="doc-meta-inline" id="reviewDocMeta">—</span>
+      <span class="review-timer" id="reviewTimer">⏱ 0:00</span>
+      <span class="sla-inline" id="reviewSla">—</span>
+      <span style="font-size:14px">🔒</span>
+    </div>
+    <div class="review-split">
+      <div class="pdf-pane">
+        <div class="pdf-toolbar">
+          <button onclick="pdfPrevPage()">◀</button>
+          <span>Page</span>
+          <input type="number" id="pdfPageInput" value="1" min="1" onchange="pdfGoToPage(this.value)"/>
+          <span>of <span id="pdfPageCount">—</span></span>
+          <button onclick="pdfNextPage()">▶</button>
+          <span style="border-left:1px solid #30363d;height:16px;margin:0 4px"></span>
+          <button onclick="pdfZoom(-0.25)">−</button>
+          <span id="pdfZoomLevel">100%</span>
+          <button onclick="pdfZoom(0.25)">+</button>
+          <button onclick="pdfFitWidth()">Fit</button>
+        </div>
+        <div class="pdf-container" id="pdfContainer"><canvas id="pdfCanvas"></canvas></div>
+      </div>
+      <div class="review-pane">
+        <div class="review-tabs">
+          <button class="active" data-tab="extraction">Extracted Data</button>
+          <button data-tab="classification">Classification</button>
+          <button data-tab="fraud">Fraud Signals</button>
+          <button data-tab="notes">Notes</button>
+        </div>
+        <div class="tab-content">
+          <div class="tab-panel active" id="tabExtraction"></div>
+          <div class="tab-panel" id="tabClassification"></div>
+          <div class="tab-panel" id="tabFraud"></div>
+          <div class="tab-panel" id="tabNotes"></div>
+        </div>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button class="btn btn-approve" onclick="submitReview('approve')">✅ Approve</button>
+      <button class="btn btn-reject" onclick="showRejectModal()">❌ Reject</button>
+      <button class="btn btn-escalate" onclick="showEscalateModal()">⬆️ Escalate</button>
+      <button class="btn btn-release" onclick="releaseDocument()">🔓 Release</button>
+      <span class="spacer"></span>
+      <span class="shortcuts-hint">Ctrl+Enter: Approve · Ctrl+Shift+R: Reject · Esc: Release</span>
+    </div>
+  </div>
+
+  <div class="view" id="viewHistory">
+    <div class="history-controls">
+      <input type="search" id="historySearch" placeholder="Search document ID, reviewer, action..."/>
+      <button class="btn btn-ghost btn-sm" onclick="loadHistory()">↻ Refresh</button>
+    </div>
+    <div class="queue-table-wrap">
+      <table class="history-table"><thead><tr>
+        <th></th><th>Document ID</th><th>Reviewer</th><th>Action</th><th>Timestamp</th><th>Time Spent</th><th>Changes</th>
+      </tr></thead><tbody id="historyBody"></tbody></table>
+    </div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="rejectModal">
+  <div class="modal">
+    <h2>❌ Reject Document</h2>
+    <label>Reason</label>
+    <select id="rejectReason"><option value="">Select a reason...</option><option value="ILLEGIBLE">Illegible Document</option><option value="WRONG_DOC_TYPE">Wrong Document Type</option><option value="INCOMPLETE_DOCUMENT">Incomplete Document</option><option value="DUPLICATE">Duplicate</option><option value="OTHER">Other</option></select>
+    <label>Notes (optional)</label>
+    <textarea id="rejectNote" rows="3" placeholder="Additional details..."></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-reject" onclick="submitReject()">Reject</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="escalateModal">
+  <div class="modal">
+    <h2>⬆️ Escalate Document</h2>
+    <label>Reason</label>
+    <textarea id="escalateReason" rows="3" placeholder="Why is this being escalated?"></textarea>
+    <label>Escalate To</label>
+    <select id="escalateTarget"><option value="supervisor">Supervisor</option><option value="fraud_team">Fraud Team</option><option value="compliance">Compliance</option></select>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-escalate" onclick="submitEscalate()">Escalate</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const API_BASE='https://rzeejg3ra4.execute-api.us-east-1.amazonaws.com';
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const state={reviewer:localStorage.getItem('hitl-reviewer')||'',currentView:'queue',currentDocument:null,
+  queueFilter:{type:'all',docType:'all',slaStatus:'all',status:'all',search:''},
+  queue:[],reviewData:null,editedFields:{},reviewStartTime:null,pdfDoc:null,pdfPage:1,pdfScale:1.0,
+  heartbeatInterval:null,queueInterval:null,slaTimerInterval:null,reviewTimerInterval:null,online:true};
+
+document.addEventListener('DOMContentLoaded',()=>{
+  const ri=document.getElementById('reviewerInput');
+  ri.value=state.reviewer;
+  ri.addEventListener('change',e=>{state.reviewer=e.target.value.trim();localStorage.setItem('hitl-reviewer',state.reviewer)});
+  document.querySelectorAll('.header-nav button').forEach(b=>b.addEventListener('click',()=>navigateTo(b.dataset.view)));
+  document.querySelectorAll('.review-tabs button').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
+  ['filterQueue','filterDocType','filterSla','filterStatus'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{applyFilters();loadQueue()}));
+  document.getElementById('filterSearch').addEventListener('input',debounce(()=>{applyFilters();loadQueue()},300));
+  document.getElementById('historySearch').addEventListener('input',debounce(()=>loadHistory(),300));
+  window.addEventListener('hashchange',handleRoute);
+  handleRoute();
+  state.queueInterval=setInterval(()=>{if(state.currentView==='queue')loadQueue()},10000);
+  state.slaTimerInterval=setInterval(updateSlaTimers,1000);
+  loadStats();setInterval(loadStats,30000);
+  window.addEventListener('online',()=>setOnline(true));
+  window.addEventListener('offline',()=>setOnline(false));
+});
+
+function handleRoute(){const h=location.hash.slice(1)||'queue';if(h.startsWith('review/'))navigateTo('review',decodeURIComponent(h.slice(7)));else navigateTo(h)}
+
+function navigateTo(view,docId){
+  if(state.currentView==='review'&&view!=='review'){stopHeartbeat();clearInterval(state.reviewTimerInterval);state.reviewTimerInterval=null}
+  state.currentView=view;
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.header-nav button').forEach(b=>b.classList.remove('active'));
+  if(view==='queue'){document.getElementById('viewQueue').classList.add('active');document.querySelector('[data-view="queue"]').classList.add('active');location.hash='#queue';loadQueue()}
+  else if(view==='review'){document.getElementById('viewReview').classList.add('active');location.hash='#review/'+encodeURIComponent(docId);loadDocument(docId)}
+  else if(view==='history'){document.getElementById('viewHistory').classList.add('active');document.querySelector('[data-view="history"]').classList.add('active');location.hash='#history';loadHistory()}
+}
+
+async function apiFetch(path,opts={}){
+  const headers={'Content-Type':'application/json'};
+  if(state.reviewer){headers['X-Reviewer-Id']=state.reviewer;headers['X-Reviewer-Name']=state.reviewer}
+  try{const res=await fetch(API_BASE+path,{...opts,headers:{...headers,...opts.headers}});
+    if(!res.ok){const b=await res.json().catch(()=>({}));throw new Error(b.error||b.message||'HTTP '+res.status)}return res}
+  catch(e){if(e.message==='Failed to fetch')setOnline(false);throw e}
+}
+
+function applyFilters(){state.queueFilter={type:document.getElementById('filterQueue').value,docType:document.getElementById('filterDocType').value,slaStatus:document.getElementById('filterSla').value,status:document.getElementById('filterStatus').value,search:document.getElementById('filterSearch').value.trim()}}
+
+async function loadQueue(){
+  try{const f=state.queueFilter,p=new URLSearchParams();
+    if(f.type!=='all')p.set('queueType',f.type);if(f.docType!=='all')p.set('documentType',f.docType);
+    if(f.slaStatus!=='all')p.set('slaStatus',f.slaStatus);if(f.status!=='all')p.set('status',f.status);
+    if(f.search)p.set('search',f.search);p.set('pageSize','50');
+    const res=await apiFetch('/api/hitl/queue?'+p.toString());const data=await res.json();
+    state.queue=data.items||[];setOnline(true);renderQueue();
+    document.getElementById('lastRefresh').textContent='Updated '+new Date().toLocaleTimeString();
+  }catch(e){console.error('Queue load:',e)}
+}
+
+function renderQueue(){
+  const tbody=document.getElementById('queueBody');
+  if(!state.queue.length){tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:40px;color:#484f58">No items in queue</td></tr>';return}
+  tbody.innerHTML=state.queue.map(item=>{
+    const sc=getSlaClass(item),confPct=Math.round((item.confidenceScore||0)*100),
+      confCls=confPct>=70?'conf-high':confPct>=50?'conf-med':'conf-low',
+      qCls=item.queueType==='fraud'?'queue-fraud':'queue-hitl',
+      stCls='status-'+item.status,tiq=formatDuration(Date.now()-new Date(item.queuedAt).getTime()),
+      slaT=formatSlaCountdown(item.slaDeadline),slaTCls=getSlaTimerClass(item),
+      isLocked=item.status==='in_review',isMine=item.lockedByName===state.reviewer;
+    return`<tr class="sla-${sc}" data-sla-deadline="${item.slaDeadline}">
+      <td class="doc-id-cell">${esc(item.documentId)}</td><td>${esc(item.documentType)}</td>
+      <td>${esc(item.borrowerName||'—')}</td><td><span class="conf-badge ${confCls}">${confPct}%</span></td>
+      <td><span class="queue-badge ${qCls}">${item.queueType}</span></td>
+      <td><span class="status-badge ${stCls}">${item.status.replace('_',' ')}</span></td>
+      <td>${tiq}</td><td class="sla-countdown ${slaTCls}" data-deadline="${item.slaDeadline}">${slaT}</td>
+      <td>${isLocked?esc(item.lockedByName||item.lockedBy||'—'):'—'}</td>
+      <td>${isLocked&&!isMine?'<span style="font-size:11px;color:#484f58">Locked</span>':isLocked&&isMine?`<button class="btn btn-sm btn-primary" onclick="openReview('${esc(item.documentId)}')">Resume</button>`:`<button class="btn btn-sm btn-claim" onclick="claimDocument('${esc(item.documentId)}')" ${!state.reviewer?'disabled title="Enter your name first"':''}>Claim</button>`}</td></tr>`
+  }).join('')
+}
+
+function getSlaClass(i){const d=new Date(i.slaDeadline).getTime(),q=new Date(i.queuedAt).getTime(),n=Date.now();if(n>=d)return'breached';const p=(n-q)/(d-q);return p>=.8?'danger':p>=.5?'warning':'ok'}
+function getSlaTimerClass(i){const c=getSlaClass(i);return c==='breached'?'sla-breached-text':c==='danger'?'sla-red':c==='warning'?'sla-yellow':'sla-green'}
+function formatSlaCountdown(dl){const d=new Date(dl).getTime()-Date.now();return d<=0?'BREACHED':formatDuration(d)}
+function formatDuration(ms){if(ms<0)ms=0;const s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60);return h>0?h+'h '+m%60+'m':m>0?m+'m '+s%60+'s':s+'s'}
+function updateSlaTimers(){document.querySelectorAll('.sla-countdown').forEach(el=>{const dl=el.dataset.deadline;if(dl)el.textContent=formatSlaCountdown(dl)})}
+
+async function claimDocument(docId){
+  if(!state.reviewer){toast('Enter your name first','warn');return}
+  try{const res=await apiFetch('/api/hitl/claim/'+encodeURIComponent(docId),{method:'POST',body:JSON.stringify({reviewerId:state.reviewer,reviewerName:state.reviewer})});
+    const data=await res.json();state.currentDocument=data.document||null;toast('Document claimed','success');navigateTo('review',docId)}
+  catch(e){toast('Claim failed: '+e.message,'error')}
+}
+function openReview(docId){navigateTo('review',docId)}
+
+async function loadDocument(docId){
+  state.editedFields={};state.reviewStartTime=Date.now();startReviewTimer();
+  try{const res=await apiFetch('/api/hitl/document/'+encodeURIComponent(docId));const data=await res.json();
+    state.reviewData=data;state.currentDocument=data;
+    document.getElementById('reviewDocTitle').textContent=data.documentId||docId;
+    document.getElementById('reviewDocMeta').textContent=(data.documentType||'—')+' • '+(data.matterId||'');
+    updateReviewSla();renderExtractionTab(data);renderClassificationTab(data);renderFraudTab(data);renderNotesTab(data);loadPdf(data);startHeartbeat(docId)}
+  catch(e){toast('Failed to load document: '+e.message,'error')}
+}
+
+function updateReviewSla(){if(!state.reviewData)return;const el=document.getElementById('reviewSla'),dl=state.reviewData.slaDeadline;
+  if(dl){el.textContent='SLA: '+formatSlaCountdown(dl);el.className='sla-inline '+getSlaTimerClass({slaDeadline:dl,queuedAt:state.reviewData.queuedAt||new Date().toISOString()})}}
+
+function startReviewTimer(){clearInterval(state.reviewTimerInterval);state.reviewTimerInterval=setInterval(()=>{
+  if(!state.reviewStartTime)return;const el=document.getElementById('reviewTimer'),e=Date.now()-state.reviewStartTime,m=Math.floor(e/60000),s=Math.floor((e%60000)/1000);
+  el.textContent='⏱ '+m+':'+String(s).padStart(2,'0');updateReviewSla()},1000)}
+
+async function loadPdf(data){
+  try{let url=data.pdfUrl;
+    if(!url){const r=await fetch(API_BASE+'/api/documents/'+encodeURIComponent(data.documentId||data.id)+'/pdf',{redirect:'follow'});url=r.url}
+    if(!url){document.getElementById('pdfContainer').innerHTML='<div style="color:#484f58;padding:40px;text-align:center">No PDF available</div>';return}
+    const doc=await pdfjsLib.getDocument(url).promise;state.pdfDoc=doc;state.pdfPage=1;state.pdfScale=1.0;
+    document.getElementById('pdfPageCount').textContent=doc.numPages;document.getElementById('pdfPageInput').max=doc.numPages;renderPdfPage()}
+  catch(e){console.error('PDF:',e);document.getElementById('pdfContainer').innerHTML='<div style="color:#484f58;padding:40px;text-align:center">Failed to load PDF</div>'}
+}
+
+async function renderPdfPage(){if(!state.pdfDoc)return;const pg=await state.pdfDoc.getPage(state.pdfPage),vp=pg.getViewport({scale:state.pdfScale}),
+  c=document.getElementById('pdfCanvas'),ctx=c.getContext('2d');c.height=vp.height;c.width=vp.width;await pg.render({canvasContext:ctx,viewport:vp}).promise;
+  document.getElementById('pdfPageInput').value=state.pdfPage;document.getElementById('pdfZoomLevel').textContent=Math.round(state.pdfScale*100)+'%'}
+
+function pdfPrevPage(){if(state.pdfPage>1){state.pdfPage--;renderPdfPage()}}
+function pdfNextPage(){if(state.pdfDoc&&state.pdfPage<state.pdfDoc.numPages){state.pdfPage++;renderPdfPage()}}
+function pdfGoToPage(n){n=parseInt(n);if(state.pdfDoc&&n>=1&&n<=state.pdfDoc.numPages){state.pdfPage=n;renderPdfPage()}}
+function pdfZoom(d){state.pdfScale=Math.max(.25,Math.min(4,state.pdfScale+d));renderPdfPage()}
+function pdfFitWidth(){if(!state.pdfDoc)return;state.pdfDoc.getPage(state.pdfPage).then(pg=>{const cw=document.getElementById('pdfContainer').clientWidth-20,vp=pg.getViewport({scale:1});state.pdfScale=cw/vp.width;renderPdfPage()})}
+
+const FIELD_GROUPS={'Employee':['employeesFullName','ssn'],'Employer':['employersName'],'Pay Period':['payPeriodStartDate','payPeriodEndDate','payDate'],
+  'Earnings':['grossPay','netPay','ytdGrossPay','ytdNetPay'],'Taxes & Deductions':['federalTaxWithheld','stateTaxWithheld','socialSecurityWithheld','medicareWithheld']};
+const FIELD_LABELS={employeesFullName:'Full Name',employersName:'Employer Name',grossPay:'Gross Pay',netPay:'Net Pay',
+  payPeriodStartDate:'Start Date',payPeriodEndDate:'End Date',payDate:'Pay Date',
+  federalTaxWithheld:'Federal Tax',stateTaxWithheld:'State Tax',socialSecurityWithheld:'Social Security',
+  medicareWithheld:'Medicare',ytdGrossPay:'YTD Gross',ytdNetPay:'YTD Net',ssn:'SSN'};
+
+function renderExtractionTab(data){
+  const panel=document.getElementById('tabExtraction'),fields=data.extractedData?.fields||{};
+  const allKnown=Object.values(FIELD_GROUPS).flat(),extra=Object.keys(fields).filter(k=>!allKnown.includes(k));
+  let html='';
+  for(const[group,keys]of Object.entries(FIELD_GROUPS)){
+    html+='<div class="field-group"><div class="field-group-title">'+group+'</div>';
+    for(const key of keys)html+=renderFieldRow(key,fields[key]||{value:'',confidence:null});
+    html+='</div>'}
+  if(extra.length){html+='<div class="field-group"><div class="field-group-title">Other Fields</div>';for(const k of extra)html+=renderFieldRow(k,fields[k]);html+='</div>'}
+  if(!Object.keys(fields).length)html='<div style="color:#484f58;padding:20px;text-align:center">No extracted data available</div>';
+  panel.innerHTML=html;
+  panel.querySelectorAll('.field-input').forEach(inp=>{inp.addEventListener('input',()=>{
+    const k=inp.dataset.field,o=inp.dataset.original,r=inp.closest('.field-row');
+    if(inp.value!==o){state.editedFields[k]=inp.value;r.classList.add('modified');inp.classList.add('modified')}
+    else{delete state.editedFields[k];r.classList.remove('modified');inp.classList.remove('modified')}})})
+}
+
+function renderFieldRow(key,field){
+  const val=field.value??'',conf=field.confidence,cc=conf===null?'':conf>=.85?'high':conf>=.5?'med':'low',
+    lc=conf!==null&&conf<.5,label=FIELD_LABELS[key]||key.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()),
+    ct=conf!==null?Math.round(conf*100)+'%':'',
+    clr=conf===null?'#484f58':conf>=.85?'#3fb950':conf>=.5?'#d29922':'#f85149';
+  return`<div class="field-row${lc?' low-confidence':''}"><div class="field-label"><span class="conf-dot ${cc}"></span>${esc(label)}</div>
+    <div class="field-original" title="Original: ${esc(String(val))}">${esc(String(val))}</div>
+    <input class="field-input" data-field="${esc(key)}" data-original="${esc(String(val))}" value="${esc(String(val))}"/>
+    <div class="field-conf" style="color:${clr}">${ct}</div></div>`
+}
+
+function renderClassificationTab(data){
+  const p=document.getElementById('tabClassification'),c=data.classification||{},dt=data.documentType||'—',
+    conf=c.confidence??data.classificationConfidence,rat=c.rationale||c.reasoning||'—',
+    clr=conf>=.85?'#3fb950':conf>=.5?'#d29922':'#f85149';
+  p.innerHTML=`<div class="classification-card"><h3>Document Classification</h3>
+    <div class="classification-row"><span style="color:#8b949e">Document Type</span><span style="color:#f0f6fc;font-weight:600">${esc(dt)}</span></div>
+    <div class="classification-row"><span style="color:#8b949e">Confidence</span><span style="font-weight:600;color:${clr}">${conf!=null?Math.round(conf*100)+'%':'—'}</span></div></div>
+    <div class="classification-card"><h3>Rationale</h3><p style="font-size:13px;line-height:1.5;color:#c9d1d9">${esc(rat)}</p></div>`
+}
+
+function renderFraudTab(data){
+  const p=document.getElementById('tabFraud'),f=data.fraudSignals;
+  if(!f){p.innerHTML='<div style="color:#484f58;padding:20px;text-align:center">No fraud signals — document not in fraud queue</div>';return}
+  const score=f.riskScore||0,tier=score>=80?'HIGH':score>=50?'MEDIUM':'LOW',tc=score>=80?'#f85149':score>=50?'#d29922':'#3fb950',sigs=f.signals||[];
+  let html=`<div class="fraud-score-container"><div class="fraud-score-label" style="color:${tc}">${score}</div>
+    <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;color:${tc}">${tier} RISK</div>
+    <div style="margin-top:8px;height:6px;background:#21262d;border-radius:3px;width:200px;margin:8px auto 0">
+    <div style="width:${score}%;height:100%;border-radius:3px;background:${tc}"></div></div></div>`;
+  if(sigs.length){html+='<div style="margin-top:16px">';for(const s of sigs){const pr=Math.round((s.probability||0)*100),sc=pr>=80?'#f85149':pr>=50?'#d29922':'#3fb950';
+    html+=`<div class="fraud-signal"><div class="fraud-signal-header"><span class="fraud-signal-type">⚠️ ${esc(s.type||s.description||'Unknown')}</span>
+    <span class="fraud-signal-prob" style="color:${sc}">${pr}%</span></div><div class="fraud-signal-desc">${esc(s.description||'')}</div>
+    <div class="fraud-bar"><div class="fraud-bar-fill" style="width:${pr}%;background:${sc}"></div></div></div>`}html+='</div>'}
+  p.innerHTML=html
+}
+
+function renderNotesTab(data){
+  const p=document.getElementById('tabNotes'),notes=data.notes||[];
+  let html='<div class="notes-input-row"><textarea id="noteInput" placeholder="Add a note..."></textarea><button class="btn btn-primary" onclick="addNote()" style="align-self:flex-end">Add</button></div>';
+  html+=notes.length?notes.map(n=>`<div class="note-item"><div class="note-meta">${esc(n.authorName||'System')} · ${new Date(n.createdAt).toLocaleString()}</div><div class="note-text">${esc(n.text)}</div></div>`).join(''):'<div style="color:#484f58;text-align:center;padding:16px">No notes yet</div>';
+  p.innerHTML=html
+}
+
+async function addNote(){const inp=document.getElementById('noteInput'),t=inp.value.trim();if(!t||!state.currentDocument)return;
+  const docId=state.currentDocument.documentId||state.currentDocument.id;
+  try{await apiFetch('/api/hitl/document/'+encodeURIComponent(docId)+'/notes',{method:'POST',body:JSON.stringify({text:t,authorId:state.reviewer,authorName:state.reviewer})});
+    inp.value='';toast('Note added','success');const r=await apiFetch('/api/hitl/document/'+encodeURIComponent(docId));const d=await r.json();state.reviewData=d;renderNotesTab(d)}
+  catch(e){toast('Failed to add note: '+e.message,'error')}}
+
+function switchTab(tab){document.querySelectorAll('.review-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab'+tab.charAt(0).toUpperCase()+tab.slice(1)).classList.add('active')}
+
+async function submitReview(action){if(!state.currentDocument)return;
+  if(action==='approve'&&!confirm('Approve this document with the current data?'))return;
+  const docId=state.currentDocument.documentId||state.currentDocument.id,dur=Math.round((Date.now()-state.reviewStartTime)/1000);
+  try{const body={action,reviewerId:state.reviewer,reviewerName:state.reviewer,reviewDurationSeconds:dur};
+    if(action==='approve')body.correctedFields=state.editedFields;
+    await apiFetch('/api/hitl/review/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify(body)});
+    toast('Document '+action+'d successfully','success');stopHeartbeat();navigateTo('queue')}
+  catch(e){toast(action+' failed: '+e.message,'error')}}
+
+function showRejectModal(){document.getElementById('rejectModal').classList.add('open')}
+function showEscalateModal(){document.getElementById('escalateModal').classList.add('open')}
+function closeModal(){document.querySelectorAll('.modal-overlay').forEach(m=>m.classList.remove('open'))}
+
+async function submitReject(){const reason=document.getElementById('rejectReason').value;
+  if(!reason){toast('Select a rejection reason','warn');return}
+  const note=document.getElementById('rejectNote').value.trim(),docId=state.currentDocument.documentId||state.currentDocument.id,dur=Math.round((Date.now()-state.reviewStartTime)/1000);
+  try{await apiFetch('/api/hitl/review/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify({action:'reject',rejectionReason:reason,rejectionNote:note,reviewerId:state.reviewer,reviewerName:state.reviewer,reviewDurationSeconds:dur})});
+    toast('Document rejected','success');closeModal();stopHeartbeat();navigateTo('queue')}
+  catch(e){toast('Reject failed: '+e.message,'error')}}
+
+async function submitEscalate(){const reason=document.getElementById('escalateReason').value.trim();
+  if(!reason){toast('Enter an escalation reason','warn');return}
+  const target=document.getElementById('escalateTarget').value,docId=state.currentDocument.documentId||state.currentDocument.id,dur=Math.round((Date.now()-state.reviewStartTime)/1000);
+  try{await apiFetch('/api/hitl/review/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify({action:'escalate',escalationReason:reason,escalationTarget:target,reviewerId:state.reviewer,reviewerName:state.reviewer,reviewDurationSeconds:dur})});
+    toast('Document escalated','success');closeModal();stopHeartbeat();navigateTo('queue')}
+  catch(e){toast('Escalate failed: '+e.message,'error')}}
+
+async function releaseDocument(){if(!state.currentDocument)return;const docId=state.currentDocument.documentId||state.currentDocument.id;
+  try{await apiFetch('/api/hitl/release/'+encodeURIComponent(docId),{method:'POST'});toast('Document released','info');stopHeartbeat();navigateTo('queue')}
+  catch(e){toast('Release failed: '+e.message,'error')}}
+
+function startHeartbeat(docId){stopHeartbeat();state.heartbeatInterval=setInterval(async()=>{
+  try{const r=await fetch(API_BASE+'/api/hitl/heartbeat/'+encodeURIComponent(docId),{method:'POST',headers:{'Content-Type':'application/json','X-Reviewer-Id':state.reviewer}});
+    if(r.status===410){toast('Lock expired — returning to queue','error');stopHeartbeat();navigateTo('queue')}}catch(e){console.error('Heartbeat:',e)}},60000)}
+function stopHeartbeat(){if(state.heartbeatInterval){clearInterval(state.heartbeatInterval);state.heartbeatInterval=null}}
+
+window.addEventListener('beforeunload',()=>{if(state.currentDocument&&state.currentView==='review'){
+  const docId=state.currentDocument.documentId||state.currentDocument.id;
+  navigator.sendBeacon(API_BASE+'/api/hitl/release/'+encodeURIComponent(docId),JSON.stringify({reviewerId:state.reviewer}))}});
+
+async function loadStats(){try{const r=await apiFetch('/api/hitl/stats'),d=await r.json(),q=d.queues||{},h=q.hitl||{},f=q.fraud||{};
+  document.getElementById('statReviewed').textContent=(h.completedToday||0)+(f.completedToday||0);
+  document.getElementById('statAvgTime').textContent=formatDuration((d.avgReviewTimeSeconds?.hitl||0)*1000);
+  document.getElementById('statDepth').textContent=(h.pending||0)+(f.pending||0)+(h.inReview||0)+(f.inReview||0);
+  document.getElementById('statHitlPending').textContent=h.pending||0;
+  document.getElementById('statFraudPending').textContent=f.pending||0;
+  const s=d.slaCompliance?.hitl,el=document.getElementById('statSla');
+  if(s!=null){const pct=Math.round(s*100);el.textContent=pct+'%';el.className='stat-val '+(pct>=95?'good':pct>=80?'warn':'danger')}
+  document.getElementById('statBreaches').textContent=(h.slaBreaches||0)+(f.slaBreaches||0)}catch(e){console.error('Stats:',e)}}
+
+async function loadHistory(){try{const s=document.getElementById('historySearch').value.trim(),p=new URLSearchParams();
+  if(s)p.set('search',s);p.set('pageSize','50');const r=await apiFetch('/api/hitl/history?'+p.toString()),d=await r.json();renderHistory(d.items||d||[])}
+  catch(e){console.error('History:',e);document.getElementById('historyBody').innerHTML='<tr><td colspan="7" style="text-align:center;padding:40px;color:#484f58">Failed to load history</td></tr>'}}
+
+function renderHistory(items){const tbody=document.getElementById('historyBody');
+  if(!items.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:40px;color:#484f58">No review history</td></tr>';return}
+  tbody.innerHTML=items.map((item,i)=>{const ac='action-'+(item.action||'').toLowerCase(),dur=item.duration!=null?formatDuration(item.duration*1000):'—',ch=item.fieldChanges?.length||0;
+    let rows=`<tr class="${ch?'expandable':''}" onclick="${ch?'toggleDiff('+i+')':''}">
+      <td>${ch?'▶':''}</td><td class="doc-id-cell">${esc(item.documentId)}</td><td>${esc(item.reviewerName||item.reviewerId||'—')}</td>
+      <td><span class="action-badge ${ac}">${esc(item.action)}</span></td><td>${new Date(item.timestamp).toLocaleString()}</td>
+      <td>${dur}</td><td>${ch?ch+' field'+(ch>1?'s':''):'—'}</td></tr>`;
+    if(ch)rows+=`<tr class="diff-row" id="diff-${i}"><td colspan="7"><div class="diff-content">${item.fieldChanges.map(c=>`<div class="diff-item"><span class="diff-field">${esc(c.field)}</span><span class="diff-old">${esc(String(c.original))}</span><span>→</span><span class="diff-new">${esc(String(c.corrected))}</span></div>`).join('')}</div></td></tr>`;
+    return rows}).join('')}
+
+function toggleDiff(i){const r=document.getElementById('diff-'+i);if(r)r.classList.toggle('open')}
+
+document.addEventListener('keydown',e=>{
+  if(state.currentView!=='review')return;
+  if(e.key==='Escape'){if(document.querySelector('.modal-overlay.open'))closeModal();else releaseDocument();return}
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
+  if(e.ctrlKey&&e.shiftKey&&e.key==='R'){e.preventDefault();showRejectModal();return}
+  if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();submitReview('approve');return}
+  switch(e.key){case'ArrowLeft':pdfPrevPage();break;case'ArrowRight':pdfNextPage();break;case'+':case'=':pdfZoom(.25);break;case'-':pdfZoom(-.25);break}
+});
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
+function toast(msg,type='info'){const c=document.getElementById('toastContainer'),t=document.createElement('div');
+  t.className='toast toast-'+type;t.textContent=msg;c.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},4000)}
+function setOnline(v){state.online=v;const d=document.getElementById('connDot');d.className='connection-dot'+(v?'':' offline');d.title=v?'Connected':'Connection lost'}
+</script>
+</body>
+</html>
