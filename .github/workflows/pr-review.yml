@@ -1,0 +1,131 @@
+name: PR Review Gates
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  code-quality-scan:
+    name: Code Quality Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed
+        run: |
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.ts' '*.tsx' >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check for empty catch blocks
+        if: steps.changed.outputs.files != ''
+        run: |
+          VIOLATIONS=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+            # Match .catch(() => {}) and catch (e) {} patterns
+            MATCHES=$(grep -n -E '\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)|catch\s*\([^)]*\)\s*\{\s*\}' "$file" || true)
+            if [ -n "$MATCHES" ]; then
+              VIOLATIONS="$VIOLATIONS\n❌ Empty catch block in $file:\n$MATCHES\n"
+            fi
+          done <<< "${{ steps.changed.outputs.files }}"
+          if [ -n "$VIOLATIONS" ]; then
+            echo -e "$VIOLATIONS"
+            echo "## ❌ Empty Catch Blocks Found" >> $GITHUB_STEP_SUMMARY
+            echo -e "\`\`\`\n$VIOLATIONS\n\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check for explicit any types
+        if: steps.changed.outputs.files != ''
+        run: |
+          VIOLATIONS=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+            MATCHES=$(grep -n -E ':\s*any\b|<any>|as any' "$file" || true)
+            if [ -n "$MATCHES" ]; then
+              VIOLATIONS="$VIOLATIONS\n❌ Explicit 'any' type in $file:\n$MATCHES\n"
+            fi
+          done <<< "${{ steps.changed.outputs.files }}"
+          if [ -n "$VIOLATIONS" ]; then
+            echo -e "$VIOLATIONS"
+            echo "## ❌ Explicit 'any' Types Found" >> $GITHUB_STEP_SUMMARY
+            echo -e "\`\`\`\n$VIOLATIONS\n\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check for hardcoded credentials
+        if: steps.changed.outputs.files != ''
+        run: |
+          VIOLATIONS=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+            MATCHES=$(grep -n -i -E '(password|secret|api_key|apikey|api_secret|access_key|private_key)\s*[:=]\s*["\x27][^"\x27]{4,}' "$file" || true)
+            if [ -n "$MATCHES" ]; then
+              VIOLATIONS="$VIOLATIONS\n🚨 Possible hardcoded credential in $file:\n$MATCHES\n"
+            fi
+          done <<< "${{ steps.changed.outputs.files }}"
+          if [ -n "$VIOLATIONS" ]; then
+            echo -e "$VIOLATIONS"
+            echo "## 🚨 Hardcoded Credentials Detected" >> $GITHUB_STEP_SUMMARY
+            echo -e "\`\`\`\n$VIOLATIONS\n\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check for raw console.log
+        if: steps.changed.outputs.files != ''
+        run: |
+          VIOLATIONS=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+            MATCHES=$(grep -n 'console\.log' "$file" || true)
+            if [ -n "$MATCHES" ]; then
+              VIOLATIONS="$VIOLATIONS\n⚠️ console.log in $file (use structured logger instead):\n$MATCHES\n"
+            fi
+          done <<< "${{ steps.changed.outputs.files }}"
+          if [ -n "$VIOLATIONS" ]; then
+            echo -e "$VIOLATIONS"
+            echo "## ⚠️ Raw console.log Detected" >> $GITHUB_STEP_SUMMARY
+            echo -e "\`\`\`\n$VIOLATIONS\n\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  bundle-size:
+    name: Lambda Bundle Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Check bundle sizes
+        run: |
+          echo "## Lambda Bundle Sizes" >> $GITHUB_STEP_SUMMARY
+          WARN=false
+          for zip in dist/*.zip; do
+            [ ! -f "$zip" ] && continue
+            SIZE=$(stat -f%z "$zip" 2>/dev/null || stat -c%s "$zip" 2>/dev/null)
+            SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+            NAME=$(basename "$zip")
+            if (( $(echo "$SIZE_MB > 5" | bc -l) )); then
+              echo "⚠️ **$NAME**: ${SIZE_MB}MB (exceeds 5MB)" >> $GITHUB_STEP_SUMMARY
+              echo "::warning::Bundle $NAME is ${SIZE_MB}MB (>5MB limit)"
+              WARN=true
+            else
+              echo "✅ **$NAME**: ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
+            fi
+          done

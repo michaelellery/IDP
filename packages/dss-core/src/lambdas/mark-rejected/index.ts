@@ -1,8 +1,9 @@
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
+import type { MarkRejectedEvent, MarkRejectedResult } from '../../lib/types';
 
 const eb = new EventBridgeClient({});
 
-export const handler = async (event: any) => {
+export const handler = async (event: MarkRejectedEvent): Promise<MarkRejectedResult> => {
   const { documentId, matterId, feedbackType, message } = event;
 
   await eb.send(new PutEventsCommand({

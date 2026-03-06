@@ -1,0 +1,131 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 1,
+      "properties": { "markdown": "# IDP Pipeline Health Dashboard" }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 1, "width": 12, "height": 6,
+      "properties": {
+        "title": "Step Functions Executions",
+        "metrics": [
+          ["AWS/States", "ExecutionsStarted", "StateMachineArn", "arn:aws:states:us-east-1:430695043165:stateMachine:idp-dev-document-pipeline", {"stat": "Sum"}],
+          [".", "ExecutionsSucceeded", ".", ".", {"stat": "Sum"}],
+          [".", "ExecutionsFailed", ".", ".", {"stat": "Sum", "color": "#d62728"}],
+          [".", "ExecutionsTimedOut", ".", ".", {"stat": "Sum", "color": "#ff7f0e"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries", "stacked": false
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 1, "width": 12, "height": 6,
+      "properties": {
+        "title": "Step Functions Execution Duration",
+        "metrics": [
+          ["AWS/States", "ExecutionTime", "StateMachineArn", "arn:aws:states:us-east-1:430695043165:stateMachine:idp-dev-document-pipeline", {"stat": "Average"}],
+          ["...", {"stat": "p99"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 7, "width": 12, "height": 6,
+      "properties": {
+        "title": "Lambda Errors (All Functions)",
+        "metrics": [
+          ["AWS/Lambda", "Errors", "FunctionName", "idp-decomposition", {"stat": "Sum"}],
+          ["...", "idp-quality-check", {"stat": "Sum"}],
+          ["...", "idp-classification", {"stat": "Sum"}],
+          ["...", "idp-data-extraction", {"stat": "Sum"}],
+          ["...", "idp-fraud-check", {"stat": "Sum"}],
+          ["...", "idp-mark-complete", {"stat": "Sum"}],
+          ["...", "idp-mark-rejected", {"stat": "Sum"}],
+          ["...", "idp-send-feedback", {"stat": "Sum"}],
+          ["...", "idp-api", {"stat": "Sum"}],
+          ["...", "idp-populate-db", {"stat": "Sum"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 7, "width": 12, "height": 6,
+      "properties": {
+        "title": "Lambda Duration (Max)",
+        "metrics": [
+          ["AWS/Lambda", "Duration", "FunctionName", "idp-decomposition", {"stat": "Maximum"}],
+          ["...", "idp-quality-check", {"stat": "Maximum"}],
+          ["...", "idp-classification", {"stat": "Maximum"}],
+          ["...", "idp-data-extraction", {"stat": "Maximum"}],
+          ["...", "idp-fraud-check", {"stat": "Maximum"}],
+          ["...", "idp-api", {"stat": "Maximum"}],
+          ["...", "idp-populate-db", {"stat": "Maximum"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 13, "width": 8, "height": 6,
+      "properties": {
+        "title": "Aurora CPU & Memory",
+        "metrics": [
+          ["AWS/RDS", "CPUUtilization", "DBClusterIdentifier", "idp-dev", {"stat": "Average"}],
+          [".", "FreeableMemory", ".", ".", {"stat": "Average", "yAxis": "right"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 13, "width": 8, "height": 6,
+      "properties": {
+        "title": "Aurora Connections",
+        "metrics": [
+          ["AWS/RDS", "DatabaseConnections", "DBClusterIdentifier", "idp-dev", {"stat": "Maximum"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 13, "width": 8, "height": 6,
+      "properties": {
+        "title": "SQS Queue Depth",
+        "metrics": [
+          ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "idp-dev-fraud-review-queue", {"stat": "Maximum"}],
+          ["...", "idp-dev-hitl-queue", {"stat": "Maximum"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 19, "width": 12, "height": 6,
+      "properties": {
+        "title": "API Gateway 5XX & 4XX",
+        "metrics": [
+          ["AWS/ApiGateway", "5XXError", "ApiId", "rzeejg3ra4", {"stat": "Sum", "color": "#d62728"}],
+          [".", "4XXError", ".", ".", {"stat": "Sum", "color": "#ff7f0e"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 19, "width": 12, "height": 6,
+      "properties": {
+        "title": "API Gateway Latency",
+        "metrics": [
+          ["AWS/ApiGateway", "Latency", "ApiId", "rzeejg3ra4", {"stat": "Average"}],
+          ["...", {"stat": "p99"}]
+        ],
+        "period": 300, "region": "us-east-1", "view": "timeSeries"
+      }
+    }
+  ]
+}

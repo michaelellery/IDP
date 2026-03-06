@@ -1,8 +1,9 @@
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
+import type { SendFeedbackEvent, FeedbackResult } from '../../lib/types';
 
 const eb = new EventBridgeClient({});
 
-export const handler = async (event: any) => {
+export const handler = async (event: SendFeedbackEvent): Promise<FeedbackResult> => {
   const { documentId, matterId, qualityResult, classificationResult } = event;
 
   let feedbackType: string;
@@ -10,7 +11,7 @@ export const handler = async (event: any) => {
 
   if (qualityResult && !qualityResult.passed) {
     feedbackType = 'quality';
-    message = qualityResult.issues.join('. ');
+    message = (qualityResult.issues || []).join('. ');
   } else if (classificationResult && !classificationResult.correctDocument) {
     feedbackType = 'classification';
     message = `You uploaded a ${classificationResult.documentType}, but we need a ${classificationResult.expectedType}. Please upload the correct document.`;
@@ -19,7 +20,6 @@ export const handler = async (event: any) => {
     message = 'There was an issue with your document. Please try again.';
   }
 
-  // Publish feedback event for real-time delivery
   await eb.send(new PutEventsCommand({
     Entries: [{
       Source: 'dss.feedback',
