@@ -1,0 +1,214 @@
+{
+  "Comment": "IDP Document Processing Pipeline",
+  "StartAt": "Decomposition",
+  "States": {
+    "Decomposition": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-decomposition",
+      "Comment": "Split multi-document uploads into individual documents",
+      "ResultPath": "$.decomposition",
+      "Next": "ProcessDocuments",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "HandleProcessingError",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "ProcessDocuments": {
+      "Type": "Map",
+      "ItemsPath": "$.decomposition.documents",
+      "MaxConcurrency": 10,
+      "Iterator": {
+        "StartAt": "QualityCheck",
+        "States": {
+          "QualityCheck": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-quality-check",
+            "Comment": "4-corner analysis, blur detection, completeness — feedback <5s",
+            "ResultPath": "$.qualityResult",
+            "Next": "QualityGate",
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException"],
+                "IntervalSeconds": 1,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ]
+          },
+          "QualityGate": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.qualityResult.passed",
+                "BooleanEquals": false,
+                "Next": "SendQualityFeedback"
+              }
+            ],
+            "Default": "Classification"
+          },
+          "SendQualityFeedback": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-send-feedback",
+            "Comment": "Real-time feedback: image too blurry, corners cut off, incomplete",
+            "ResultPath": "$.feedbackResult",
+            "Next": "DocumentRejected"
+          },
+          "Classification": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-classification",
+            "Comment": "AI document type classification with confidence scoring",
+            "ResultPath": "$.classificationResult",
+            "Next": "ClassificationGate"
+          },
+          "ClassificationGate": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.classificationResult.correctDocument",
+                "BooleanEquals": false,
+                "Next": "SendClassificationFeedback"
+              }
+            ],
+            "Default": "ParallelProcessing"
+          },
+          "SendClassificationFeedback": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-send-feedback",
+            "Comment": "Real-time feedback: wrong document type uploaded",
+            "ResultPath": "$.feedbackResult",
+            "Next": "DocumentRejected"
+          },
+          "ParallelProcessing": {
+            "Type": "Parallel",
+            "Branches": [
+              {
+                "StartAt": "DataExtraction",
+                "States": {
+                  "DataExtraction": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-data-extraction",
+                    "Comment": "Extract predefined fields into RDS per doc type schema",
+                    "ResultPath": "$.extractionResult",
+                    "End": true,
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["Lambda.ServiceException"],
+                        "IntervalSeconds": 2,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "StartAt": "FraudCheck",
+                "States": {
+                  "FraudCheck": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-fraud-check",
+                    "Comment": "Resistant.ai document tampering and fraud detection",
+                    "ResultPath": "$.fraudResult",
+                    "End": true
+                  }
+                }
+              }
+            ],
+            "ResultPath": "$.processingResults",
+            "Next": "ConfidenceGate"
+          },
+          "ConfidenceGate": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.processingResults[0].extractionResult.confidence",
+                "NumericLessThan": 0.85,
+                "Next": "RouteToHITL"
+              },
+              {
+                "Variable": "$.processingResults[1].fraudResult.flagged",
+                "BooleanEquals": true,
+                "Next": "RouteToFraudReview"
+              }
+            ],
+            "Default": "MarkComplete"
+          },
+          "RouteToHITL": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Comment": "Route to HITL work queue — pauses until human completes review",
+            "Parameters": {
+              "QueueUrl": "arn:aws:sqs:us-east-1:ACCOUNT_ID:idp-hitl-queue",
+              "MessageBody": {
+                "documentId.$": "$.documentId",
+                "matterId.$": "$.matterId",
+                "documentType.$": "$.classificationResult.documentType",
+                "extractionResult.$": "$.processingResults[0].extractionResult",
+                "taskToken.$": "$$.Task.Token"
+              }
+            },
+            "ResultPath": "$.hitlResult",
+            "Next": "MarkComplete",
+            "TimeoutSeconds": 86400
+          },
+          "RouteToFraudReview": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Comment": "Route to fraud review queue — pauses until analyst completes review",
+            "Parameters": {
+              "QueueUrl": "arn:aws:sqs:us-east-1:ACCOUNT_ID:idp-fraud-review-queue",
+              "MessageBody": {
+                "documentId.$": "$.documentId",
+                "matterId.$": "$.matterId",
+                "fraudSignals.$": "$.processingResults[1].fraudResult",
+                "taskToken.$": "$$.Task.Token"
+              }
+            },
+            "ResultPath": "$.fraudReviewResult",
+            "Next": "MarkComplete",
+            "TimeoutSeconds": 172800
+          },
+          "MarkComplete": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-mark-complete",
+            "Comment": "Update metadata, publish dss.extraction.available event",
+            "End": true
+          },
+          "DocumentRejected": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-mark-rejected",
+            "Comment": "Mark document as rejected, slot remains Open for re-upload",
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.processedDocuments",
+      "Next": "PipelineComplete"
+    },
+    "HandleProcessingError": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-handle-error",
+      "Comment": "Log error, publish failure event, alert ops",
+      "Next": "PipelineFailed"
+    },
+    "PipelineComplete": {
+      "Type": "Succeed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "ProcessingError",
+      "Cause": "Document processing pipeline failed"
+    }
+  }
+}

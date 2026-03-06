@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.terraform/
+*.tfstate*
+.env
+*.js.map
+coverage/
+.DS_Store
