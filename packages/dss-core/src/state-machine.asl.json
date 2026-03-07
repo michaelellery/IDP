@@ -10,7 +10,10 @@
       "Next": "ProcessDocuments",
       "Retry": [
         {
-          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2
@@ -18,7 +21,9 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "HandleProcessingError",
           "ResultPath": "$.error"
         }
@@ -34,12 +39,14 @@
           "QualityCheck": {
             "Type": "Task",
             "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-quality-check",
-            "Comment": "4-corner analysis, blur detection, completeness — feedback <5s",
+            "Comment": "4-corner analysis, blur detection, completeness \u2014 feedback <5s",
             "ResultPath": "$.qualityResult",
             "Next": "QualityGate",
             "Retry": [
               {
-                "ErrorEquals": ["Lambda.ServiceException"],
+                "ErrorEquals": [
+                  "Lambda.ServiceException"
+                ],
                 "IntervalSeconds": 1,
                 "MaxAttempts": 2,
                 "BackoffRate": 2
@@ -103,7 +110,9 @@
                     "End": true,
                     "Retry": [
                       {
-                        "ErrorEquals": ["Lambda.ServiceException"],
+                        "ErrorEquals": [
+                          "Lambda.ServiceException"
+                        ],
                         "IntervalSeconds": 2,
                         "MaxAttempts": 3,
                         "BackoffRate": 2
@@ -126,7 +135,7 @@
               }
             ],
             "ResultPath": "$.processingResults",
-            "Next": "ConfidenceGate"
+            "Next": "ContentValidation"
           },
           "ConfidenceGate": {
             "Type": "Choice",
@@ -147,7 +156,7 @@
           "RouteToHITL": {
             "Type": "Task",
             "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
-            "Comment": "Route to HITL work queue — pauses until human completes review",
+            "Comment": "Route to HITL work queue \u2014 pauses until human completes review",
             "Parameters": {
               "QueueUrl": "arn:aws:sqs:us-east-1:ACCOUNT_ID:idp-hitl-queue",
               "MessageBody": {
@@ -165,7 +174,7 @@
           "RouteToFraudReview": {
             "Type": "Task",
             "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
-            "Comment": "Route to fraud review queue — pauses until analyst completes review",
+            "Comment": "Route to fraud review queue \u2014 pauses until analyst completes review",
             "Parameters": {
               "QueueUrl": "arn:aws:sqs:us-east-1:ACCOUNT_ID:idp-fraud-review-queue",
               "MessageBody": {
@@ -190,6 +199,44 @@
             "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-mark-rejected",
             "Comment": "Mark document as rejected, slot remains Open for re-upload",
             "End": true
+          },
+          "ContentValidation": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:idp-content-validation",
+            "Comment": "Phase 2 fraud: content validation using extraction results + Phase 1 signals",
+            "ResultPath": "$.contentValidationResult",
+            "Next": "ConfidenceGate",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 3,
+                "MaxAttempts": 5,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "States.TaskFailed"
+                ],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 2,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ConfidenceGate",
+                "ResultPath": "$.contentValidationError",
+                "Comment": "Fail-open: if CV errors, proceed to ConfidenceGate with original data"
+              }
+            ]
           }
         }
       },
