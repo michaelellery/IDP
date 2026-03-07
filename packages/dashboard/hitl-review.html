@@ -168,6 +168,27 @@ table.history-table{width:100%;border-collapse:collapse;font-size:13px}
 @keyframes pulse-row{0%,100%{background:transparent}50%{background:#f8514910}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes slideIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+.manual-entry-toggle{display:flex;align-items:center;gap:6px;margin-left:8px}
+.manual-entry-btn{padding:4px 12px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#8b949e;cursor:pointer;font-size:12px;transition:all .15s;display:flex;align-items:center;gap:4px}
+.manual-entry-btn:hover{border-color:#58a6ff;color:#c9d1d9}
+.manual-entry-btn.active{background:#1f6feb20;border-color:#58a6ff;color:#58a6ff}
+.manual-entry-badge{display:none;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;color:#58a6ff;background:#58a6ff15;letter-spacing:.5px}
+.manual-entry-badge.visible{display:inline-block}
+.save-indicator{font-size:11px;color:#484f58;margin-left:8px;transition:all .3s}
+.save-indicator.saving{color:#d29922}
+.save-indicator.saved{color:#3fb950}
+.doc-type-selector{padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;margin-left:8px}
+.doc-type-selector:focus{border-color:#58a6ff;outline:none}
+.provenance-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.provenance-dot.ai{background:#3fb950}.provenance-dot.human{background:#58a6ff}.provenance-dot.corrected{background:#d29922}
+.provenance-label{font-size:9px;color:#484f58;margin-left:2px}
+.field-input.required-missing{border-color:#f85149!important;background:#f8514910!important}
+.required-asterisk{color:#f85149;margin-left:2px}
+.review-tabs button.manual-active{border-bottom-color:#58a6ff;background:#1f6feb10}
+.field-group.template-mode .field-row{padding:8px}
+.field-group.template-mode .field-input{padding:6px 10px}
+
 </style>
 </head>
 <body>
@@ -231,6 +252,20 @@ table.history-table{width:100%;border-collapse:collapse;font-size:13px}
       <span class="doc-meta-inline" id="reviewDocMeta">—</span>
       <span class="review-timer" id="reviewTimer">⏱ 0:00</span>
       <span class="sla-inline" id="reviewSla">—</span>
+      <div class="manual-entry-toggle">
+        <button class="manual-entry-btn" id="manualEntryBtn" onclick="toggleManualEntry()" title="Toggle manual data entry mode">📝 Manual Entry</button>
+        <span class="manual-entry-badge" id="manualEntryBadge">MANUAL ENTRY MODE</span>
+        <span class="save-indicator" id="saveIndicator"></span>
+      </div>
+      <select class="doc-type-selector" id="docTypeSelector" onchange="changeDocumentType(this.value)" style="display:none">
+        <option value="">Doc Type...</option>
+        <option value="paystub">Paystub</option>
+        <option value="w2">W-2</option>
+        <option value="bank_statement">Bank Statement</option>
+        <option value="tax_return">Tax Return</option>
+        <option value="photo_id">Photo ID</option>
+        <option value="1099">1099</option>
+      </select>
       <span style="font-size:14px">🔒</span>
     </div>
     <div class="review-split">
@@ -270,7 +305,7 @@ table.history-table{width:100%;border-collapse:collapse;font-size:13px}
       <button class="btn btn-escalate" onclick="showEscalateModal()">⬆️ Escalate</button>
       <button class="btn btn-release" onclick="releaseDocument()">🔓 Release</button>
       <span class="spacer"></span>
-      <span class="shortcuts-hint">Ctrl+Enter: Approve · Ctrl+Shift+R: Reject · Esc: Release</span>
+      <span class="shortcuts-hint">Ctrl+Enter: Approve · Ctrl+Shift+R: Reject · Ctrl+S: Save Draft · Esc: Release</span>
     </div>
   </div>
 
@@ -319,13 +354,16 @@ table.history-table{width:100%;border-collapse:collapse;font-size:13px}
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-const API_BASE='https://rzeejg3ra4.execute-api.us-east-1.amazonaws.com';
+const API_BASE='';
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const state={reviewer:localStorage.getItem('hitl-reviewer')||'',currentView:'queue',currentDocument:null,
   queueFilter:{type:'all',docType:'all',slaStatus:'all',status:'all',search:''},
   queue:[],reviewData:null,editedFields:{},reviewStartTime:null,pdfDoc:null,pdfPage:1,pdfScale:1.0,
-  heartbeatInterval:null,queueInterval:null,slaTimerInterval:null,reviewTimerInterval:null,online:true};
+  heartbeatInterval:null,queueInterval:null,slaTimerInterval:null,reviewTimerInterval:null,online:true,
+  // Manual entry state
+  manualEntryMode:false,fieldTemplate:null,fieldProvenance:{},draftSaveTimer:null,
+  draftSaving:false,lastDraftSave:0,originalAiValues:{}};
 
 document.addEventListener('DOMContentLoaded',()=>{
   const ri=document.getElementById('reviewerInput');
@@ -348,7 +386,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 function handleRoute(){const h=location.hash.slice(1)||'queue';if(h.startsWith('review/'))navigateTo('review',decodeURIComponent(h.slice(7)));else navigateTo(h)}
 
 function navigateTo(view,docId){
-  if(state.currentView==='review'&&view!=='review'){stopHeartbeat();clearInterval(state.reviewTimerInterval);state.reviewTimerInterval=null}
+  if(state.currentView==='review'&&view!=='review'){stopHeartbeat();clearInterval(state.reviewTimerInterval);state.reviewTimerInterval=null;state.manualEntryMode=false;updateManualEntryUI()}
   state.currentView=view;
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('.header-nav button').forEach(b=>b.classList.remove('active'));
@@ -388,7 +426,7 @@ function renderQueue(){
       stCls='status-'+item.status,tiq=formatDuration(Date.now()-new Date(item.queuedAt).getTime()),
       slaT=formatSlaCountdown(item.slaDeadline),slaTCls=getSlaTimerClass(item),
       isLocked=item.status==='in_review',isMine=item.lockedByName===state.reviewer;
-    return`<tr class="sla-${sc}" data-sla-deadline="${item.slaDeadline}">
+    return`<tr class="sla-${sc}" data-sla-deadline="${item.slaDeadline}" style="cursor:pointer" onclick="if(event.target.tagName==='BUTTON')return;if(!state.reviewer){toast('Enter your name first','warn');return;}claimDocument('${esc(item.documentId)}')">
       <td class="doc-id-cell">${esc(item.documentId)}</td><td>${esc(item.documentType)}</td>
       <td>${esc(item.borrowerName||'—')}</td><td><span class="conf-badge ${confCls}">${confPct}%</span></td>
       <td><span class="queue-badge ${qCls}">${item.queueType}</span></td>
@@ -414,13 +452,264 @@ async function claimDocument(docId){
 function openReview(docId){navigateTo('review',docId)}
 
 async function loadDocument(docId){
-  state.editedFields={};state.reviewStartTime=Date.now();startReviewTimer();
-  try{const res=await apiFetch('/api/hitl/document/'+encodeURIComponent(docId));const data=await res.json();
+  state.editedFields={};state.reviewStartTime=Date.now();state.fieldProvenance={};state.originalAiValues={};state.fieldTemplate=null;startReviewTimer();
+  try{const res=await apiFetch('/api/hitl/review/'+encodeURIComponent(docId));const data=await res.json();
     state.reviewData=data;state.currentDocument=data;
     document.getElementById('reviewDocTitle').textContent=data.documentId||docId;
     document.getElementById('reviewDocMeta').textContent=(data.documentType||'—')+' • '+(data.matterId||'');
-    updateReviewSla();renderExtractionTab(data);renderClassificationTab(data);renderFraudTab(data);renderNotesTab(data);loadPdf(data);startHeartbeat(docId)}
-  catch(e){toast('Failed to load document: '+e.message,'error')}
+    // Set doc type selector
+    const sel=document.getElementById('docTypeSelector');
+    const dt=(data.documentType||'').toLowerCase().replace(/[\s-]+/g,'_');
+    sel.value=dt;
+    updateReviewSla();renderExtractionTab(data);renderClassificationTab(data);renderFraudTab(data);renderNotesTab(data);loadPdf(data);startHeartbeat(docId);
+    // Load draft if exists
+    await loadDraft(docId);
+  }catch(e){toast('Failed to load document: '+e.message,'error')}
+}
+
+// ===== MANUAL ENTRY =====
+
+function toggleManualEntry(){
+  state.manualEntryMode=!state.manualEntryMode;
+  updateManualEntryUI();
+  if(state.manualEntryMode){
+    const dt=(state.reviewData?.documentType||'').toLowerCase().replace(/[\s-]+/g,'_');
+    document.getElementById('docTypeSelector').style.display='inline-block';
+    loadFieldTemplate(dt);
+  }else{
+    document.getElementById('docTypeSelector').style.display='none';
+    renderExtractionTab(state.reviewData);
+  }
+}
+
+function updateManualEntryUI(){
+  const btn=document.getElementById('manualEntryBtn');
+  const badge=document.getElementById('manualEntryBadge');
+  const tab=document.querySelector('[data-tab="extraction"]');
+  btn.classList.toggle('active',state.manualEntryMode);
+  badge.classList.toggle('visible',state.manualEntryMode);
+  if(tab)tab.classList.toggle('manual-active',state.manualEntryMode);
+}
+
+async function loadFieldTemplate(docType){
+  if(!docType){toast('No document type set','warn');return}
+  try{
+    const res=await apiFetch('/api/hitl/templates/'+encodeURIComponent(docType));
+    const data=await res.json();
+    state.fieldTemplate=data.schema||data;
+    renderTemplateExtractionTab();
+  }catch(e){
+    console.error('Template load error:',e);
+    toast('No template for this doc type','warn');
+    state.fieldTemplate=null;
+  }
+}
+
+function renderTemplateExtractionTab(){
+  const panel=document.getElementById('tabExtraction');
+  const template=state.fieldTemplate;
+  if(!template||!template.fieldGroups){panel.innerHTML='<div style="color:#484f58;padding:20px;text-align:center">No template available</div>';return}
+
+  // Get existing AI-extracted values
+  const aiFields=state.reviewData?.extractedData?.fields||{};
+  // Also check flat extraction data
+  const flatExtraction=state.reviewData?.extractedData||{};
+
+  let html='';
+  const groups=template.fieldGroups.sort((a,b)=>a.order-b.order);
+  for(const group of groups){
+    html+='<div class="field-group template-mode"><div class="field-group-title">'+esc(group.name)+'</div>';
+    const fields=(group.fields||[]).sort((a,b)=>a.order-b.order);
+    for(const field of fields){
+      const aiField=aiFields[field.key]||{};
+      let aiVal=aiField.value??flatExtraction[field.key]??'';
+      if(aiVal===null||aiVal===undefined)aiVal='';
+      const editedVal=state.editedFields[field.key];
+      const currentVal=editedVal!==undefined?editedVal:String(aiVal);
+
+      // Track original AI values
+      if(aiVal!=='')state.originalAiValues[field.key]=String(aiVal);
+
+      // Determine provenance
+      let prov=state.fieldProvenance[field.key];
+      if(!prov){
+        if(aiVal!=='')prov={source:'ai',original:String(aiVal)};
+        else prov={source:'empty',original:''};
+      }
+      const provDot=prov.source==='ai'?'ai':prov.source==='human'?'human':prov.source==='ai+human_corrected'?'corrected':'';
+      const provLabel=prov.source==='ai'?'🤖 AI':prov.source==='human'?'👤 Human':prov.source==='ai+human_corrected'?'🔄 Corrected':'';
+      const conf=aiField.confidence;
+      const confText=conf!=null?Math.round(conf*100)+'%':(prov.source==='human'?'100%':'');
+      const confColor=prov.source==='human'?'#58a6ff':conf>=.85?'#3fb950':conf>=.5?'#d29922':conf!=null?'#f85149':'#484f58';
+      const reqMark=field.required?'<span class="required-asterisk">*</span>':'';
+      const isModified=editedVal!==undefined&&editedVal!==String(aiVal);
+
+      html+=`<div class="field-row${isModified?' modified':''}" data-field-key="${esc(field.key)}">
+        <div class="field-label">${provDot?'<span class="provenance-dot '+provDot+'"></span>':''}${esc(field.label)}${reqMark}</div>
+        <input class="field-input${isModified?' modified':''}" data-field="${esc(field.key)}" data-original="${esc(String(aiVal))}" data-field-type="${field.type}" data-required="${field.required?'true':'false'}" value="${esc(currentVal)}" placeholder="${esc(field.label)}..." tabindex="0"/>
+        <div style="display:flex;align-items:center;gap:4px;min-width:80px;justify-content:flex-end">
+          <span style="font-size:9px;color:#484f58">${provLabel}</span>
+          <span class="field-conf" style="color:${confColor}">${confText}</span>
+        </div>
+      </div>`;
+    }
+    html+='</div>';
+  }
+  panel.innerHTML=html;
+  bindFieldInputs();
+}
+
+function bindFieldInputs(){
+  const panel=document.getElementById('tabExtraction');
+  panel.querySelectorAll('.field-input').forEach(inp=>{
+    inp.addEventListener('input',()=>{
+      const key=inp.dataset.field;
+      const original=inp.dataset.original;
+      const val=inp.value;
+
+      // Update edited fields
+      if(val!==original){
+        state.editedFields[key]=val;
+        inp.classList.add('modified');
+        inp.closest('.field-row').classList.add('modified');
+      }else{
+        delete state.editedFields[key];
+        inp.classList.remove('modified');
+        inp.closest('.field-row').classList.remove('modified');
+      }
+
+      // Update provenance
+      if(state.originalAiValues[key]!==undefined){
+        // Had AI value
+        if(val!==state.originalAiValues[key]&&val!==''){
+          state.fieldProvenance[key]={source:'ai+human_corrected',original:state.originalAiValues[key]};
+        }else if(val===state.originalAiValues[key]){
+          state.fieldProvenance[key]={source:'ai',original:state.originalAiValues[key]};
+        }
+      }else{
+        // Was empty, human entered
+        if(val!==''){
+          state.fieldProvenance[key]={source:'human',original:''};
+        }else{
+          delete state.fieldProvenance[key];
+        }
+      }
+
+      // Remove required-missing style on input
+      inp.classList.remove('required-missing');
+
+      // Debounced auto-save
+      scheduleDraftSave();
+    });
+  });
+}
+
+// ===== DRAFT AUTO-SAVE =====
+
+function scheduleDraftSave(){
+  if(state.draftSaveTimer)clearTimeout(state.draftSaveTimer);
+  state.draftSaveTimer=setTimeout(()=>saveDraft(),2000);
+}
+
+async function saveDraft(){
+  if(!state.currentDocument||state.draftSaving)return;
+  const docId=state.currentDocument.documentId||state.currentDocument.id;
+  state.draftSaving=true;
+  const indicator=document.getElementById('saveIndicator');
+  indicator.textContent='Saving...';indicator.className='save-indicator saving';
+
+  const draftData={editedFields:state.editedFields,fieldProvenance:state.fieldProvenance,manualEntryMode:state.manualEntryMode};
+  // localStorage backup
+  try{localStorage.setItem('draft-'+docId,JSON.stringify({...draftData,savedAt:Date.now()}))}catch(e){console.error('localStorage save error:',e)}
+
+  try{
+    await apiFetch('/api/hitl/draft/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify({draftData,mode:state.manualEntryMode?'manual_entry':'review',documentType:state.reviewData?.documentType||''})});
+    state.lastDraftSave=Date.now();
+    indicator.textContent='Saved ✓';indicator.className='save-indicator saved';
+    setTimeout(()=>{if(Date.now()-state.lastDraftSave>=2500)indicator.textContent=''},3000);
+  }catch(e){
+    console.error('Draft save failed:',e);
+    indicator.textContent='Save failed';indicator.className='save-indicator';
+  }finally{state.draftSaving=false}
+}
+
+async function loadDraft(docId){
+  try{
+    // Try server draft first
+    let serverDraft=null;
+    try{const res=await apiFetch('/api/hitl/draft/'+encodeURIComponent(docId));serverDraft=await res.json()}catch(e){}
+
+    // Check localStorage
+    let localDraft=null;
+    try{const raw=localStorage.getItem('draft-'+docId);if(raw)localDraft=JSON.parse(raw)}catch(e){}
+
+    let draftToUse=null;
+    if(serverDraft&&localDraft){
+      const serverTime=new Date(serverDraft.lastSavedAt).getTime();
+      if(localDraft.savedAt>serverTime){
+        if(confirm('A newer local draft was found. Restore it?'))draftToUse=localDraft;
+        else draftToUse=serverDraft.draftData;
+      }else{draftToUse=serverDraft.draftData}
+    }else if(serverDraft){draftToUse=serverDraft.draftData}
+    else if(localDraft){draftToUse=localDraft}
+
+    if(draftToUse){
+      state.editedFields=draftToUse.editedFields||{};
+      state.fieldProvenance=draftToUse.fieldProvenance||{};
+      if(draftToUse.manualEntryMode){
+        state.manualEntryMode=true;
+        updateManualEntryUI();
+        document.getElementById('docTypeSelector').style.display='inline-block';
+        const dt=(state.reviewData?.documentType||'').toLowerCase().replace(/[\s-]+/g,'_');
+        await loadFieldTemplate(dt);
+      }else if(Object.keys(state.editedFields).length){
+        // Re-render extraction with saved edits
+        renderExtractionTab(state.reviewData);
+      }
+      if(Object.keys(state.editedFields).length)toast('Draft restored','info');
+    }
+  }catch(e){console.error('Draft load error:',e)}
+}
+
+// ===== DOC TYPE CHANGE =====
+
+async function changeDocumentType(newType){
+  if(!newType)return;
+  if(Object.keys(state.editedFields).length>0){
+    if(!confirm('Changing document type will reset fields. Continue?')){{
+      // Reset selector
+      const dt=(state.reviewData?.documentType||'').toLowerCase().replace(/[\s-]+/g,'_');
+      document.getElementById('docTypeSelector').value=dt;
+      return;
+    }}
+  }
+  state.editedFields={};state.fieldProvenance={};state.originalAiValues={};
+  if(state.reviewData)state.reviewData.documentType=newType;
+  document.getElementById('reviewDocMeta').textContent=newType+' • '+(state.reviewData?.matterId||'');
+  await loadFieldTemplate(newType);
+}
+
+// ===== REQUIRED FIELD VALIDATION =====
+
+function validateRequiredFields(){
+  if(!state.fieldTemplate||!state.fieldTemplate.fieldGroups)return{valid:true,missing:[]};
+  const missing=[];
+  for(const group of state.fieldTemplate.fieldGroups){
+    for(const field of(group.fields||[])){
+      if(!field.required)continue;
+      const val=state.editedFields[field.key]??state.originalAiValues[field.key]??'';
+      if(!String(val).trim())missing.push(field);
+    }
+  }
+  return{valid:missing.length===0,missing};
+}
+
+function highlightMissingFields(missing){
+  const panel=document.getElementById('tabExtraction');
+  missing.forEach(f=>{
+    const inp=panel.querySelector('[data-field="'+f.key+'"]');
+    if(inp)inp.classList.add('required-missing');
+  });
 }
 
 function updateReviewSla(){if(!state.reviewData)return;const el=document.getElementById('reviewSla'),dl=state.reviewData.slaDeadline;
@@ -457,6 +746,7 @@ const FIELD_LABELS={employeesFullName:'Full Name',employersName:'Employer Name',
   medicareWithheld:'Medicare',ytdGrossPay:'YTD Gross',ytdNetPay:'YTD Net',ssn:'SSN'};
 
 function renderExtractionTab(data){
+  if(state.manualEntryMode&&state.fieldTemplate){renderTemplateExtractionTab();return}
   const panel=document.getElementById('tabExtraction'),fields=data.extractedData?.fields||{};
   const allKnown=Object.values(FIELD_GROUPS).flat(),extra=Object.keys(fields).filter(k=>!allKnown.includes(k));
   let html='';
@@ -470,7 +760,9 @@ function renderExtractionTab(data){
   panel.querySelectorAll('.field-input').forEach(inp=>{inp.addEventListener('input',()=>{
     const k=inp.dataset.field,o=inp.dataset.original,r=inp.closest('.field-row');
     if(inp.value!==o){state.editedFields[k]=inp.value;r.classList.add('modified');inp.classList.add('modified')}
-    else{delete state.editedFields[k];r.classList.remove('modified');inp.classList.remove('modified')}})})
+    else{delete state.editedFields[k];r.classList.remove('modified');inp.classList.remove('modified')}
+    scheduleDraftSave();
+  })})
 }
 
 function renderFieldRow(key,field){
@@ -478,9 +770,12 @@ function renderFieldRow(key,field){
     lc=conf!==null&&conf<.5,label=FIELD_LABELS[key]||key.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()),
     ct=conf!==null?Math.round(conf*100)+'%':'',
     clr=conf===null?'#484f58':conf>=.85?'#3fb950':conf>=.5?'#d29922':'#f85149';
-  return`<div class="field-row${lc?' low-confidence':''}"><div class="field-label"><span class="conf-dot ${cc}"></span>${esc(label)}</div>
+  const editedVal=state.editedFields[key];
+  const displayVal=editedVal!==undefined?editedVal:String(val);
+  const isModified=editedVal!==undefined&&editedVal!==String(val);
+  return`<div class="field-row${lc?' low-confidence':''}${isModified?' modified':''}"><div class="field-label"><span class="conf-dot ${cc}"></span>${esc(label)}</div>
     <div class="field-original" title="Original: ${esc(String(val))}">${esc(String(val))}</div>
-    <input class="field-input" data-field="${esc(key)}" data-original="${esc(String(val))}" value="${esc(String(val))}"/>
+    <input class="field-input${isModified?' modified':''}" data-field="${esc(key)}" data-original="${esc(String(val))}" value="${esc(displayVal)}" tabindex="0"/>
     <div class="field-conf" style="color:${clr}">${ct}</div></div>`
 }
 
@@ -518,8 +813,8 @@ function renderNotesTab(data){
 
 async function addNote(){const inp=document.getElementById('noteInput'),t=inp.value.trim();if(!t||!state.currentDocument)return;
   const docId=state.currentDocument.documentId||state.currentDocument.id;
-  try{await apiFetch('/api/hitl/document/'+encodeURIComponent(docId)+'/notes',{method:'POST',body:JSON.stringify({text:t,authorId:state.reviewer,authorName:state.reviewer})});
-    inp.value='';toast('Note added','success');const r=await apiFetch('/api/hitl/document/'+encodeURIComponent(docId));const d=await r.json();state.reviewData=d;renderNotesTab(d)}
+  try{await apiFetch('/api/hitl/review/'+encodeURIComponent(docId)+'/notes',{method:'POST',body:JSON.stringify({text:t,authorId:state.reviewer,authorName:state.reviewer})});
+    inp.value='';toast('Note added','success');const r=await apiFetch('/api/hitl/review/'+encodeURIComponent(docId));const d=await r.json();state.reviewData=d;renderNotesTab(d)}
   catch(e){toast('Failed to add note: '+e.message,'error')}}
 
 function switchTab(tab){document.querySelectorAll('.review-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
@@ -527,11 +822,36 @@ function switchTab(tab){document.querySelectorAll('.review-tabs button').forEach
   document.getElementById('tab'+tab.charAt(0).toUpperCase()+tab.slice(1)).classList.add('active')}
 
 async function submitReview(action){if(!state.currentDocument)return;
+  // Validate required fields in manual entry mode
+  if(action==='approve'&&state.manualEntryMode&&state.fieldTemplate){
+    const v=validateRequiredFields();
+    if(!v.valid){
+      highlightMissingFields(v.missing);
+      toast(v.missing.length+' required field'+(v.missing.length>1?'s':'')+' missing','error');
+      return;
+    }
+  }
   if(action==='approve'&&!confirm('Approve this document with the current data?'))return;
   const docId=state.currentDocument.documentId||state.currentDocument.id,dur=Math.round((Date.now()-state.reviewStartTime)/1000);
   try{const body={action,reviewerId:state.reviewer,reviewerName:state.reviewer,reviewDurationSeconds:dur};
-    if(action==='approve')body.correctedFields=state.editedFields;
+    if(action==='approve'){
+      body.correctedFields=state.editedFields;
+      // Build provenance for submission
+      const fp={};
+      for(const[k,v]of Object.entries(state.editedFields)){
+        const prov=state.fieldProvenance[k]||{source:'human'};
+        fp[k]={source:prov.source,value:v};
+      }
+      // Include AI-only fields too
+      for(const[k,prov]of Object.entries(state.fieldProvenance)){
+        if(!fp[k])fp[k]={source:prov.source,value:state.originalAiValues[k]||''};
+      }
+      body.fieldProvenance=fp;
+      body.entryMode=state.manualEntryMode?'manual_entry':(Object.keys(state.editedFields).length?'hybrid':'review');
+    }
     await apiFetch('/api/hitl/review/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify(body)});
+    // Clean up localStorage draft
+    try{localStorage.removeItem('draft-'+docId)}catch(e){}
     toast('Document '+action+'d successfully','success');stopHeartbeat();navigateTo('queue')}
   catch(e){toast(action+' failed: '+e.message,'error')}}
 
@@ -543,6 +863,7 @@ async function submitReject(){const reason=document.getElementById('rejectReason
   if(!reason){toast('Select a rejection reason','warn');return}
   const note=document.getElementById('rejectNote').value.trim(),docId=state.currentDocument.documentId||state.currentDocument.id,dur=Math.round((Date.now()-state.reviewStartTime)/1000);
   try{await apiFetch('/api/hitl/review/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify({action:'reject',rejectionReason:reason,rejectionNote:note,reviewerId:state.reviewer,reviewerName:state.reviewer,reviewDurationSeconds:dur})});
+    try{localStorage.removeItem('draft-'+docId)}catch(e){}
     toast('Document rejected','success');closeModal();stopHeartbeat();navigateTo('queue')}
   catch(e){toast('Reject failed: '+e.message,'error')}}
 
@@ -550,11 +871,14 @@ async function submitEscalate(){const reason=document.getElementById('escalateRe
   if(!reason){toast('Enter an escalation reason','warn');return}
   const target=document.getElementById('escalateTarget').value,docId=state.currentDocument.documentId||state.currentDocument.id,dur=Math.round((Date.now()-state.reviewStartTime)/1000);
   try{await apiFetch('/api/hitl/review/'+encodeURIComponent(docId),{method:'PUT',body:JSON.stringify({action:'escalate',escalationReason:reason,escalationTarget:target,reviewerId:state.reviewer,reviewerName:state.reviewer,reviewDurationSeconds:dur})});
+    try{localStorage.removeItem('draft-'+docId)}catch(e){}
     toast('Document escalated','success');closeModal();stopHeartbeat();navigateTo('queue')}
   catch(e){toast('Escalate failed: '+e.message,'error')}}
 
 async function releaseDocument(){if(!state.currentDocument)return;const docId=state.currentDocument.documentId||state.currentDocument.id;
-  try{await apiFetch('/api/hitl/release/'+encodeURIComponent(docId),{method:'POST'});toast('Document released','info');stopHeartbeat();navigateTo('queue')}
+  try{await apiFetch('/api/hitl/release/'+encodeURIComponent(docId),{method:'POST'});
+    try{localStorage.removeItem('draft-'+docId)}catch(e){}
+    toast('Document released','info');stopHeartbeat();navigateTo('queue')}
   catch(e){toast('Release failed: '+e.message,'error')}}
 
 function startHeartbeat(docId){stopHeartbeat();state.heartbeatInterval=setInterval(async()=>{
@@ -564,6 +888,8 @@ function stopHeartbeat(){if(state.heartbeatInterval){clearInterval(state.heartbe
 
 window.addEventListener('beforeunload',()=>{if(state.currentDocument&&state.currentView==='review'){
   const docId=state.currentDocument.documentId||state.currentDocument.id;
+  // Save draft to localStorage on unload
+  if(Object.keys(state.editedFields).length){try{localStorage.setItem('draft-'+docId,JSON.stringify({editedFields:state.editedFields,fieldProvenance:state.fieldProvenance,manualEntryMode:state.manualEntryMode,savedAt:Date.now()}))}catch(e){}}
   navigator.sendBeacon(API_BASE+'/api/hitl/release/'+encodeURIComponent(docId),JSON.stringify({reviewerId:state.reviewer}))}});
 
 async function loadStats(){try{const r=await apiFetch('/api/hitl/stats'),d=await r.json(),q=d.queues||{},h=q.hitl||{},f=q.fraud||{};
@@ -595,9 +921,11 @@ function toggleDiff(i){const r=document.getElementById('diff-'+i);if(r)r.classLi
 document.addEventListener('keydown',e=>{
   if(state.currentView!=='review')return;
   if(e.key==='Escape'){if(document.querySelector('.modal-overlay.open'))closeModal();else releaseDocument();return}
+  // Ctrl+S / Cmd+S: force save draft
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();saveDraft();return}
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
   if(e.ctrlKey&&e.shiftKey&&e.key==='R'){e.preventDefault();showRejectModal();return}
-  if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();submitReview('approve');return}
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();submitReview('approve');return}
   switch(e.key){case'ArrowLeft':pdfPrevPage();break;case'ArrowRight':pdfNextPage();break;case'+':case'=':pdfZoom(.25);break;case'-':pdfZoom(-.25);break}
 });
 
